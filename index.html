@@ -47,6 +47,9 @@ header{display:flex;align-items:center;justify-content:space-between;gap:10px}
   display:grid;grid-template-columns:repeat(3,1fr);gap:4px;box-shadow:0 4px 0 var(--shadow)}
 .slot{width:clamp(18px,6.2vw,28px);aspect-ratio:1;border-radius:50%;background:var(--slot)}
 .tray.locked .slot{opacity:.4}
+.tray{cursor:pointer}.tray.drop{border-color:var(--accent);border-style:dashed}
+.slot.held{transform:translateY(-5px) scale(1.12);box-shadow:0 0 0 3px var(--accent)}
+.slot{transition:transform .12s}
 #unlock{position:absolute;inset:0;margin:auto;height:34px;width:80%;border:0;border-radius:10px;background:var(--accent);color:var(--accent-ink);font-size:15px}
 .bar{display:flex;gap:8px}
 .bar button,.bar label{flex:1;text-align:center;font-size:15px;background:var(--panel);border:2px solid var(--edge);border-radius:14px;padding:9px 4px;cursor:pointer}
@@ -146,7 +149,7 @@ function makePicture(lv){
 }
 
 /* ---------- game ---------- */
-let P, bead, trays, cap, hist, wrong0, taps=0, lv=1, maxLv=1, custom=false, fx={}, raf=0, s=20;
+let P, bead, trays, cap, hist, wrong0, taps=0, held=null, hinted=false, lv=1, maxLv=1, custom=false, fx={}, raf=0, s=20;
 const load=()=>{try{return JSON.parse(localStorage.getItem('mallang2'))}catch(e){return null}};
 const save=()=>{try{localStorage.setItem('mallang2',JSON.stringify({lv,maxLv}))}catch(e){}};
 function scramble(P,frac,r){
@@ -160,7 +163,7 @@ function scramble(P,frac,r){
   return out;
 }
 function begin(pic,frac,seed){
-  P=pic;bead=scramble(P,frac,rng32(seed));trays=[];cap=18;hist=[];fx={};taps=0;
+  P=pic;bead=scramble(P,frac,rng32(seed));trays=[];cap=18;hist=[];fx={};taps=0;held=null;
   wrong0=bead.filter((b,i)=>b!==P.target[i]).length||1;
   $('win').hidden=true;layout();ui();
 }
@@ -169,22 +172,44 @@ function toast(t){const e=$('toast');e.textContent=t;e.hidden=false;clearTimeout
 const empties=c=>{const o=[];for(let i=0;i<bead.length;i++)if(bead[i]<0&&P.target[i]===c)o.push(i);return o};
 function shake(msg){const c=$('cv');c.classList.remove('shake');void c.offsetWidth;c.classList.add('shake');if(msg)toast(msg)}
 function buzz(){try{navigator.vibrate&&navigator.vibrate(12)}catch(e){}}
+const heldColor=()=>held?(held.from==='board'?bead[held.i]:trays[held.k]):-1;
+const record=()=>{hist.push({b:bead.slice(),t:trays.slice(),cap});if(hist.length>120)hist.shift()};
+function after(){
+  taps++;buzz();ui();anim();
+  if(bead.every((b,j)=>b===P.target[j]))return setTimeout(win,400);
+  const movable=trays.some(t=>empties(t).length)||bead.some((b,j)=>b>=0&&b!==P.target[j]&&empties(b).length);
+  if(trays.length>=cap&&!movable)toast(cap<27?'막혔어요! 쟁반을 하나 더 열거나 되돌려봐요.':'막혔어요! 되돌리기나 다시 하기를 눌러봐요.');
+}
 function tap(i){
   const c=bead[i];
   if(c<0){
-    const t=P.target[i],k=trays.indexOf(t);
-    if(k<0)return shake('쟁반에 이 칸 색 구슬이 없어요.');
-    hist.push({b:bead.slice(),t:trays.slice(),cap});if(hist.length>120)hist.shift();
-    trays.splice(k,1);bead[i]=t;fx[i]=performance.now();taps++;buzz();ui();anim();
-    if(bead.every((b,j)=>b===P.target[j]))setTimeout(win,400);
-    return;
+    const t=P.target[i];
+    if(held){
+      if(heldColor()!==t)return shake('이 칸은 다른 색 자리예요. 반짝이는 칸에 넣어요.');
+      record();
+      if(held.from==='board')bead[held.i]=-1;else trays.splice(held.k,1);
+      bead[i]=t;fx[i]=performance.now();held=null;return after();
+    }
+    const k=trays.indexOf(t);
+    if(k<0)return shake('이 색 구슬을 먼저 골라주세요.');
+    record();trays.splice(k,1);bead[i]=t;fx[i]=performance.now();return after();
   }
-  if(c===P.target[i])return;
-  if(trays.length>=cap)return shake('쟁반이 꽉 찼어요. 빈 칸을 눌러 구슬부터 꽂아요.');
-  hist.push({b:bead.slice(),t:trays.slice(),cap});if(hist.length>120)hist.shift();
-  bead[i]=-1;trays.push(c);taps++;buzz();ui();
-  if(trays.length>=cap&&!trays.some(t=>empties(t).length))
-    toast(cap<27?'막혔어요! 쟁반을 하나 더 열거나 되돌려봐요.':'막혔어요! 되돌리기나 다시 하기를 눌러봐요.');
+  if(c===P.target[i]){if(held){held=null;ui()}return}
+  if(held&&held.from==='board'&&held.i===i){held=null;ui();return}
+  held={from:'board',i};
+  if(!hinted){hinted=true;toast(empties(c).length?'반짝이는 같은 색 칸을 누르면 바로 들어가요.':'같은 색 빈 칸이 아직 없어요. 쟁반을 눌러 담아둬요.')}
+  else if(!empties(c).length)toast('같은 색 빈 칸이 아직 없어요. 쟁반에 담아둬요.');
+  else $('toast').hidden=true;
+  ui();
+}
+function trayTap(k){
+  if(held&&held.from==='board'){
+    if(trays.length>=cap)return shake('쟁반이 꽉 찼어요. 쟁반 구슬부터 꽂아요.');
+    record();trays.push(bead[held.i]);bead[held.i]=-1;held=null;return after();
+  }
+  if(k<trays.length){held=(held&&held.from==='tray'&&held.k===k)?null:{from:'tray',k};
+    if(held&&!empties(trays[k]).length)toast('이 색 빈 칸이 아직 없어요.');ui()}
+  else if(held){held=null;ui()}
 }
 function win(){
   if(!custom&&lv>=maxLv&&lv<MAXLV){maxLv=lv+1;save()}
@@ -194,18 +219,21 @@ function win(){
   $('win').hidden=false;$('next').focus();
 }
 function ui(){
+  if(held&&(held.from==='board'?!(bead[held.i]>=0&&bead[held.i]!==P.target[held.i]):held.k>=trays.length))held=null;
   $('lvbtn').textContent=custom?'내 그림':'Lv '+lv;$('name').textContent=custom?'':P.name;
   const wrong=bead.filter((b,i)=>b!==P.target[i]).length;
   $('pct').textContent=Math.max(0,Math.round(100*(1-wrong/wrong0)))+'%';
   $('undo').disabled=!hist.length;
   const T=$('trays');T.innerHTML='';
   for(let t=0;t<3;t++){const d=document.createElement('div');const locked=t===2&&cap<27;d.className='tray'+(locked?' locked':'');
-    for(let k=0;k<9;k++){const sl=document.createElement('div');sl.className='slot';const c=trays[t*9+k];
+    if(!locked&&held&&held.from==='board')d.classList.add('drop');
+    d.onclick=e=>{if(locked||e.target.id==='unlock')return;const sl=e.target.closest('.slot');trayTap(sl?+sl.dataset.k:999)};
+    for(let k=0;k<9;k++){const sl=document.createElement('div');sl.className='slot'+(held&&held.from==='tray'&&held.k===t*9+k?' held':'');sl.dataset.k=t*9+k;const c=trays[t*9+k];
       if(c!==undefined){const h=P.pal[c];sl.style.background=`radial-gradient(circle at 35% 30%,${mix(h,'#ffffff',.55)},${h} 55%,${mix(h,'#000000',.25)})`}
       d.appendChild(sl)}
-    if(locked){const b=document.createElement('button');b.id='unlock';b.type='button';b.textContent='+ 열기';b.onclick=()=>{cap=27;ui()};d.appendChild(b)}
+    if(locked){const b=document.createElement('button');b.id='unlock';b.type='button';b.textContent='+ 열기';b.onclick=e=>{e.stopPropagation();cap=27;ui()};d.appendChild(b)}
     T.appendChild(d)}
-  draw();
+  anim();
 }
 function layout(){
   const w=$('wrap'),cv=$('cv'),dpr=window.devicePixelRatio||1;
@@ -229,13 +257,20 @@ function draw(){
     }
     if(fx[i]){const a=1-(now-fx[i])/350;if(a>0){live=true;x.fillStyle=`rgba(255,255,255,${a*.8})`;x.fillRect(cx,cy,s,s)}else delete fx[i]}
   }
+  if(held){const hc=heldColor(),pulse=.55+.45*Math.sin(now/180);live=true;
+    x.lineWidth=Math.max(2,s*.12);
+    for(let i=0;i<bead.length;i++){if(bead[i]<0&&P.target[i]===hc){const cx=(i%P.W)*s+s/2,cy=Math.floor(i/P.W)*s+s/2;
+      x.strokeStyle=`rgba(255,127,159,${pulse})`;x.beginPath();x.arc(cx,cy,s*.38,0,7);x.stroke()}}
+    if(held.from==='board'){const i=held.i,cx=(i%P.W)*s+s/2,cy=Math.floor(i/P.W)*s+s/2;
+      x.strokeStyle='#ffffff';x.lineWidth=Math.max(2,s*.14);x.beginPath();x.arc(cx,cy,s*.46,0,7);x.stroke();
+      x.strokeStyle='#ff7f9f';x.lineWidth=Math.max(1.5,s*.08);x.beginPath();x.arc(cx,cy,s*.46,0,7);x.stroke()}}
   return live;
 }
 function anim(){cancelAnimationFrame(raf);const f=()=>{if(draw())raf=requestAnimationFrame(f)};raf=requestAnimationFrame(f)}
 
 $('cv').addEventListener('pointerdown',e=>{e.preventDefault();const r=$('cv').getBoundingClientRect(),x=Math.floor((e.clientX-r.left)/s),y=Math.floor((e.clientY-r.top)/s);
   if(x>=0&&y>=0&&x<P.W&&y<P.H&&$('win').hidden)tap(y*P.W+x)});
-$('undo').onclick=()=>{const h=hist.pop();if(h){bead=h.b;trays=h.t;cap=h.cap;taps++;ui()}};
+$('undo').onclick=()=>{const h=hist.pop();if(h){bead=h.b;trays=h.t;cap=h.cap;held=null;taps++;ui()}};
 $('reset').onclick=()=>{if(custom&&hist.length){const h=hist[0];bead=h.b;trays=h.t;cap=18;hist=[];ui()}else if(!custom)startLevel(lv)};
 $('next').onclick=()=>startLevel(custom?lv:(lv>=MAXLV?1:lv+1));
 $('lvbtn').onclick=()=>{const G=$('grid');G.innerHTML='';
