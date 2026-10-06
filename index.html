@@ -146,7 +146,7 @@ function makePicture(lv){
 }
 
 /* ---------- game ---------- */
-let P, bead, trays, cap, hist, wrong0, lv=1, maxLv=1, custom=false, fx={}, raf=0, s=20;
+let P, bead, trays, cap, hist, wrong0, taps=0, lv=1, maxLv=1, custom=false, fx={}, raf=0, s=20;
 const load=()=>{try{return JSON.parse(localStorage.getItem('mallang2'))}catch(e){return null}};
 const save=()=>{try{localStorage.setItem('mallang2',JSON.stringify({lv,maxLv}))}catch(e){}};
 function scramble(P,frac,r){
@@ -160,35 +160,36 @@ function scramble(P,frac,r){
   return out;
 }
 function begin(pic,frac,seed){
-  P=pic;bead=scramble(P,frac,rng32(seed));trays=[];cap=18;hist=[];fx={};
+  P=pic;bead=scramble(P,frac,rng32(seed));trays=[];cap=18;hist=[];fx={};taps=0;
   wrong0=bead.filter((b,i)=>b!==P.target[i]).length||1;
   $('win').hidden=true;layout();ui();
 }
-function startLevel(n){lv=n;custom=false;save();begin(makePicture(n),.22+.4*(n-1)/(MAXLV-1),n*31+5)}
+function startLevel(n){lv=n;custom=false;save();begin(makePicture(n),.45+.45*(n-1)/(MAXLV-1),n*31+5)}
 function toast(t){const e=$('toast');e.textContent=t;e.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(()=>e.hidden=true,2200)}
 const empties=c=>{const o=[];for(let i=0;i<bead.length;i++)if(bead[i]<0&&P.target[i]===c)o.push(i);return o};
+function shake(msg){const c=$('cv');c.classList.remove('shake');void c.offsetWidth;c.classList.add('shake');if(msg)toast(msg)}
+function buzz(){try{navigator.vibrate&&navigator.vibrate(12)}catch(e){}}
 function tap(i){
-  const c=bead[i];if(c<0||c===P.target[i])return;
-  const W=P.W,seen=new Set([i]),q=[i];
-  for(let k=0;k<q.length;k++){const j=q[k],x=j%W;
-    for(const n of[x>0?j-1:-1,x<W-1?j+1:-1,j-W,j+W])if(n>=0&&n<bead.length&&!seen.has(n)&&bead[n]===c&&P.target[n]!==c){seen.add(n);q.push(n)}}
-  const em=empties(c), room=em.length+cap-trays.length;
-  if(room<=0){$('cv').classList.remove('shake');void $('cv').offsetWidth;$('cv').classList.add('shake');toast('쟁반이 꽉 찼어요. 빈 칸에 맞는 색부터 골라봐요.');return}
-  hist.push({b:bead.slice(),t:trays.slice(),cap});if(hist.length>60)hist.shift();
-  const take=q.slice(0,room);
-  take.forEach(j=>bead[j]=-1);
-  take.forEach((j,k)=>{if(k<em.length){bead[em[k]]=c;fx[em[k]]=performance.now()}else trays.push(c)});
-  for(let k=0;k<trays.length;k++){const e=empties(trays[k]);if(e.length){bead[e[0]]=trays[k];fx[e[0]]=performance.now();trays.splice(k,1);k--}}
-  try{navigator.vibrate&&navigator.vibrate(12)}catch(e){}
-  ui();anim();
-  if(bead.every((b,j)=>b===P.target[j]))return setTimeout(win,400);
-  if(trays.length>=cap){let ok=false;for(let j=0;j<bead.length&&!ok;j++)if(bead[j]>=0&&bead[j]!==P.target[j]&&empties(bead[j]).length)ok=true;
-    if(!ok)toast(cap<27?'막혔어요! 쟁반을 하나 더 열거나 되돌려봐요.':'막혔어요! 되돌리기나 다시 하기를 눌러봐요.')}
+  const c=bead[i];
+  if(c<0){
+    const t=P.target[i],k=trays.indexOf(t);
+    if(k<0)return shake('쟁반에 이 칸 색 구슬이 없어요.');
+    hist.push({b:bead.slice(),t:trays.slice(),cap});if(hist.length>120)hist.shift();
+    trays.splice(k,1);bead[i]=t;fx[i]=performance.now();taps++;buzz();ui();anim();
+    if(bead.every((b,j)=>b===P.target[j]))setTimeout(win,400);
+    return;
+  }
+  if(c===P.target[i])return;
+  if(trays.length>=cap)return shake('쟁반이 꽉 찼어요. 빈 칸을 눌러 구슬부터 꽂아요.');
+  hist.push({b:bead.slice(),t:trays.slice(),cap});if(hist.length>120)hist.shift();
+  bead[i]=-1;trays.push(c);taps++;buzz();ui();
+  if(trays.length>=cap&&!trays.some(t=>empties(t).length))
+    toast(cap<27?'막혔어요! 쟁반을 하나 더 열거나 되돌려봐요.':'막혔어요! 되돌리기나 다시 하기를 눌러봐요.');
 }
 function win(){
   if(!custom&&lv>=maxLv&&lv<MAXLV){maxLv=lv+1;save()}
   $('wint').textContent=custom?'내 그림 완성!':`Lv ${lv} 완성!`;
-  $('winp').textContent=custom?'직접 고른 그림을 다 맞췄어요.':(lv>=MAXLV?'100단계를 전부 깼어요. 대단해요!':`${P.name} 그림을 완성했어요.`);
+  $('winp').textContent=(custom?'직접 고른 그림을 다 맞췄어요.':(lv>=MAXLV?'100단계를 전부 깼어요. 대단해요!':`${P.name} 그림을 완성했어요.`))+` (${taps}번 터치)`;
   $('next').textContent=custom?'단계로 돌아가기':(lv>=MAXLV?'처음부터 다시':'다음 단계');
   $('win').hidden=false;$('next').focus();
 }
@@ -234,7 +235,7 @@ function anim(){cancelAnimationFrame(raf);const f=()=>{if(draw())raf=requestAnim
 
 $('cv').addEventListener('pointerdown',e=>{e.preventDefault();const r=$('cv').getBoundingClientRect(),x=Math.floor((e.clientX-r.left)/s),y=Math.floor((e.clientY-r.top)/s);
   if(x>=0&&y>=0&&x<P.W&&y<P.H&&$('win').hidden)tap(y*P.W+x)});
-$('undo').onclick=()=>{const h=hist.pop();if(h){bead=h.b;trays=h.t;cap=h.cap;ui()}};
+$('undo').onclick=()=>{const h=hist.pop();if(h){bead=h.b;trays=h.t;cap=h.cap;taps++;ui()}};
 $('reset').onclick=()=>{if(custom&&hist.length){const h=hist[0];bead=h.b;trays=h.t;cap=18;hist=[];ui()}else if(!custom)startLevel(lv)};
 $('next').onclick=()=>startLevel(custom?lv:(lv>=MAXLV?1:lv+1));
 $('lvbtn').onclick=()=>{const G=$('grid');G.innerHTML='';
