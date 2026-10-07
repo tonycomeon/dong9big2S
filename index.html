@@ -172,43 +172,70 @@ function toast(t){const e=$('toast');e.textContent=t;e.hidden=false;clearTimeout
 const empties=c=>{const o=[];for(let i=0;i<bead.length;i++)if(bead[i]<0&&P.target[i]===c)o.push(i);return o};
 function shake(msg){const c=$('cv');c.classList.remove('shake');void c.offsetWidth;c.classList.add('shake');if(msg)toast(msg)}
 function buzz(){try{navigator.vibrate&&navigator.vibrate(12)}catch(e){}}
-const heldColor=()=>held?(held.from==='board'?bead[held.i]:trays[held.k]):-1;
+const heldColor=()=>held?held.c:-1;
 const record=()=>{hist.push({b:bead.slice(),t:trays.slice(),cap});if(hist.length>120)hist.shift()};
+const isWrong=j=>bead[j]>=0&&bead[j]!==P.target[j];
+// all wrong beads of the same color touching bead i (up/down/left/right)
+function groupAt(i){
+  const c=bead[i],W=P.W,seen=new Set([i]),q=[i];
+  for(let k=0;k<q.length;k++){const j=q[k],x=j%W;
+    for(const n of[x>0?j-1:-1,x<W-1?j+1:-1,j-W,j+W])
+      if(n>=0&&n<bead.length&&!seen.has(n)&&bead[n]===c&&isWrong(n)){seen.add(n);q.push(n)}}
+  return q;
+}
+// empty spots for color c, the tapped one first, then nearest to it
+function spotsFrom(i,c){const W=P.W,x0=i%W,y0=Math.floor(i/W);
+  return empties(c).sort((a,b)=>(Math.abs(a%W-x0)+Math.abs(Math.floor(a/W)-y0))-(Math.abs(b%W-x0)+Math.abs(Math.floor(b/W)-y0)))}
+const heldCount=()=>!held?0:held.from==='board'?held.cells.length:trays.filter(t=>t===held.c).length;
 function after(){
   taps++;buzz();ui();anim();
   if(bead.every((b,j)=>b===P.target[j]))return setTimeout(win,400);
-  const movable=trays.some(t=>empties(t).length)||bead.some((b,j)=>b>=0&&b!==P.target[j]&&empties(b).length);
+  const movable=trays.some(t=>empties(t).length)||bead.some((b,j)=>isWrong(j)&&empties(b).length);
   if(trays.length>=cap&&!movable)toast(cap<27?'막혔어요! 쟁반을 하나 더 열거나 되돌려봐요.':'막혔어요! 되돌리기나 다시 하기를 눌러봐요.');
+}
+function placeAt(i,c,from){ // from: list of board cells, or null for tray
+  const spots=spotsFrom(i,c),n=Math.min(spots.length,from?from.length:trays.filter(t=>t===c).length);
+  record();const now=performance.now();
+  for(let k=0;k<n;k++){
+    if(from)bead[from[k]]=-1;else trays.splice(trays.indexOf(c),1);
+    bead[spots[k]]=c;fx[spots[k]]=now+k*40;
+  }
+  if(from){const left=from.slice(n).filter(isWrong);held=left.length?{from:'board',c,cells:left}:null}
+  else held=trays.includes(c)&&empties(c).length?held:null;
+  after();
 }
 function tap(i){
   const c=bead[i];
   if(c<0){
     const t=P.target[i];
     if(held){
-      if(heldColor()!==t)return shake('이 칸은 다른 색 자리예요. 반짝이는 칸에 넣어요.');
-      record();
-      if(held.from==='board')bead[held.i]=-1;else trays.splice(held.k,1);
-      bead[i]=t;fx[i]=performance.now();held=null;return after();
+      if(held.c!==t)return shake('이 칸은 다른 색 자리예요. 반짝이는 칸에 넣어요.');
+      return placeAt(i,t,held.from==='board'?held.cells:null);
     }
-    const k=trays.indexOf(t);
-    if(k<0)return shake('이 색 구슬을 먼저 골라주세요.');
-    record();trays.splice(k,1);bead[i]=t;fx[i]=performance.now();return after();
+    if(!trays.includes(t))return shake('이 색 구슬을 먼저 골라주세요.');
+    return placeAt(i,t,null);
   }
   if(c===P.target[i]){if(held){held=null;ui()}return}
-  if(held&&held.from==='board'&&held.i===i){held=null;ui();return}
-  held={from:'board',i};
-  if(!hinted){hinted=true;toast(empties(c).length?'반짝이는 같은 색 칸을 누르면 바로 들어가요.':'같은 색 빈 칸이 아직 없어요. 쟁반을 눌러 담아둬요.')}
-  else if(!empties(c).length)toast('같은 색 빈 칸이 아직 없어요. 쟁반에 담아둬요.');
-  else $('toast').hidden=true;
+  if(held&&held.from==='board'&&held.cells.includes(i)){held=null;ui();return}
+  const g=groupAt(i);held={from:'board',c,cells:g};
+  const e=empties(c).length;
+  if(!hinted){hinted=true;toast(e?'붙어 있는 같은 색 구슬이 함께 골라져요. 반짝이는 칸을 누르면 같이 들어가요.':'같은 색 빈 칸이 아직 없어요. 쟁반을 눌러 담아둬요.')}
+  else if(!e)toast(`${g.length}개 골랐어요. 같은 색 빈 칸이 아직 없으니 쟁반에 담아둬요.`);
+  else toast(`${g.length}개 골랐어요.`);
   ui();
 }
 function trayTap(k){
   if(held&&held.from==='board'){
-    if(trays.length>=cap)return shake('쟁반이 꽉 찼어요. 쟁반 구슬부터 꽂아요.');
-    record();trays.push(bead[held.i]);bead[held.i]=-1;held=null;return after();
+    const room=cap-trays.length;
+    if(room<=0)return shake('쟁반이 꽉 찼어요. 쟁반 구슬부터 꽂아요.');
+    record();const n=Math.min(room,held.cells.length);
+    for(let j=0;j<n;j++){trays.push(bead[held.cells[j]]);bead[held.cells[j]]=-1}
+    const left=held.cells.slice(n).filter(isWrong);held=left.length?{from:'board',c:held.c,cells:left}:null;
+    if(left.length)toast(`쟁반이 꽉 차서 ${left.length}개는 남았어요.`);
+    return after();
   }
-  if(k<trays.length){held=(held&&held.from==='tray'&&held.k===k)?null:{from:'tray',k};
-    if(held&&!empties(trays[k]).length)toast('이 색 빈 칸이 아직 없어요.');ui()}
+  if(k<trays.length){const c=trays[k];held=(held&&held.from==='tray'&&held.c===c)?null:{from:'tray',c};
+    if(held&&!empties(c).length)toast('이 색 빈 칸이 아직 없어요.');ui()}
   else if(held){held=null;ui()}
 }
 function win(){
@@ -219,7 +246,8 @@ function win(){
   $('win').hidden=false;$('next').focus();
 }
 function ui(){
-  if(held&&(held.from==='board'?!(bead[held.i]>=0&&bead[held.i]!==P.target[held.i]):held.k>=trays.length))held=null;
+  if(held&&held.from==='board'){held.cells=held.cells.filter(j=>bead[j]===held.c&&isWrong(j));if(!held.cells.length)held=null}
+  if(held&&held.from==='tray'&&!trays.includes(held.c))held=null;
   $('lvbtn').textContent=custom?'내 그림':'Lv '+lv;$('name').textContent=custom?'':P.name;
   const wrong=bead.filter((b,i)=>b!==P.target[i]).length;
   $('pct').textContent=Math.max(0,Math.round(100*(1-wrong/wrong0)))+'%';
@@ -228,7 +256,7 @@ function ui(){
   for(let t=0;t<3;t++){const d=document.createElement('div');const locked=t===2&&cap<27;d.className='tray'+(locked?' locked':'');
     if(!locked&&held&&held.from==='board')d.classList.add('drop');
     d.onclick=e=>{if(locked||e.target.id==='unlock')return;const sl=e.target.closest('.slot');trayTap(sl?+sl.dataset.k:999)};
-    for(let k=0;k<9;k++){const sl=document.createElement('div');sl.className='slot'+(held&&held.from==='tray'&&held.k===t*9+k?' held':'');sl.dataset.k=t*9+k;const c=trays[t*9+k];
+    for(let k=0;k<9;k++){const sl=document.createElement('div');sl.className='slot'+(held&&held.from==='tray'&&trays[t*9+k]===held.c?' held':'');sl.dataset.k=t*9+k;const c=trays[t*9+k];
       if(c!==undefined){const h=P.pal[c];sl.style.background=`radial-gradient(circle at 35% 30%,${mix(h,'#ffffff',.55)},${h} 55%,${mix(h,'#000000',.25)})`}
       d.appendChild(sl)}
     if(locked){const b=document.createElement('button');b.id='unlock';b.type='button';b.textContent='+ 열기';b.onclick=e=>{e.stopPropagation();cap=27;ui()};d.appendChild(b)}
@@ -255,13 +283,13 @@ function draw(){
         x.lineWidth=Math.max(1,s*.07);x.strokeStyle=mix(h,'#000000',.3);x.stroke();
         x.fillStyle='rgba(255,255,255,.7)';x.beginPath();x.arc(mx-s*.14,my-s*.15,s*.11,0,7);x.fill()}
     }
-    if(fx[i]){const a=1-(now-fx[i])/350;if(a>0){live=true;x.fillStyle=`rgba(255,255,255,${a*.8})`;x.fillRect(cx,cy,s,s)}else delete fx[i]}
+    if(fx[i]){const a=now<fx[i]?1:1-(now-fx[i])/350;if(now<fx[i])live=true;if(a>0){live=true;x.fillStyle=`rgba(255,255,255,${a*.8})`;x.fillRect(cx,cy,s,s)}else delete fx[i]}
   }
   if(held){const hc=heldColor(),pulse=.55+.45*Math.sin(now/180);live=true;
     x.lineWidth=Math.max(2,s*.12);
     for(let i=0;i<bead.length;i++){if(bead[i]<0&&P.target[i]===hc){const cx=(i%P.W)*s+s/2,cy=Math.floor(i/P.W)*s+s/2;
       x.strokeStyle=`rgba(255,127,159,${pulse})`;x.beginPath();x.arc(cx,cy,s*.38,0,7);x.stroke()}}
-    if(held.from==='board'){const i=held.i,cx=(i%P.W)*s+s/2,cy=Math.floor(i/P.W)*s+s/2;
+    if(held.from==='board')for(const i of held.cells){const cx=(i%P.W)*s+s/2,cy=Math.floor(i/P.W)*s+s/2;
       x.strokeStyle='#ffffff';x.lineWidth=Math.max(2,s*.14);x.beginPath();x.arc(cx,cy,s*.46,0,7);x.stroke();
       x.strokeStyle='#ff7f9f';x.lineWidth=Math.max(1.5,s*.08);x.beginPath();x.arc(cx,cy,s*.46,0,7);x.stroke()}}
   return live;
